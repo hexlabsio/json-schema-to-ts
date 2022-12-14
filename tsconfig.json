@@ -18,10 +18,9 @@
     "pretty": true,
     "inlineSourceMap": false,
     "inlineSources": false,
-    "esModuleInterop": true,
+    "esModuleInterop": true
   },
   "include": [
-    "src/**/*",
-    "test/**/*"
+    "src/**/*"
   ]
 }
