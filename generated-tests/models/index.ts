@@ -93,8 +93,8 @@ export class JSONSchema7Builder {
     return this
   }
 
-  _default(_default: unknown): this {
-    this.JSONSchema7.default = _default
+  defaultValue(defaultValue: unknown): this {
+    this.JSONSchema7.default = defaultValue
     return this
   }
 
@@ -208,7 +208,7 @@ export class JSONSchema7Builder {
     return this
   }
 
-  adddefinitions(key: string, definitions: JSONSchema7Type): this {
+  addDefinitions(key: string, definitions: JSONSchema7Type): this {
     this.JSONSchema7 = { ...this.JSONSchema7, [key]: definitions }
     return this
   }
@@ -218,7 +218,7 @@ export class JSONSchema7Builder {
     return this
   }
 
-  addproperties(key: string, properties: JSONSchema7Type): this {
+  addProperties(key: string, properties: JSONSchema7Type): this {
     this.JSONSchema7 = { ...this.JSONSchema7, [key]: properties }
     return this
   }
@@ -230,7 +230,7 @@ export class JSONSchema7Builder {
     return this
   }
 
-  addpatternProperties(key: string, patternProperties: JSONSchema7Type): this {
+  addPatternProperties(key: string, patternProperties: JSONSchema7Type): this {
     this.JSONSchema7 = { ...this.JSONSchema7, [key]: patternProperties }
     return this
   }
@@ -242,7 +242,7 @@ export class JSONSchema7Builder {
     return this
   }
 
-  adddependencies(
+  addDependencies(
     key: string,
     dependencies: JSONSchema7Type | stringArray
   ): this {
@@ -255,13 +255,13 @@ export class JSONSchema7Builder {
     return this
   }
 
-  _const(_const: unknown): this {
-    this.JSONSchema7.const = _const
+  constant(constant: unknown): this {
+    this.JSONSchema7.const = constant
     return this
   }
 
-  _enum(_enum: unknown[]): this {
-    this.JSONSchema7.enum = _enum
+  enumeration(enumeration: unknown[]): this {
+    this.JSONSchema7.enum = enumeration
     return this
   }
 
@@ -285,8 +285,8 @@ export class JSONSchema7Builder {
     return this
   }
 
-  _if(_if: JSONSchema7Type): this {
-    this.JSONSchema7.if = _if
+  setIf(setIf: JSONSchema7Type): this {
+    this.JSONSchema7.if = setIf
     return this
   }
 
@@ -295,8 +295,8 @@ export class JSONSchema7Builder {
     return this
   }
 
-  _else(_else: JSONSchema7Type): this {
-    this.JSONSchema7.else = _else
+  setElse(setElse: JSONSchema7Type): this {
+    this.JSONSchema7.else = setElse
     return this
   }
 

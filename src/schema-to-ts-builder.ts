@@ -244,22 +244,25 @@ export class SchemaToTsBuilder {
     return `{${extras}}`;
   }
 
-  private nameForProperty(property: string): string {
+  private nameForProperty(property: string): {name: string, camelCase: string, capitalised: string} {
     const keywords = ['default', 'const', 'enum', 'if', 'else'];
-    if(keywords.includes(property)) return `_${property}`;
-    return property;
+    const alternative = ['defaultValue', 'constant', 'enumeration', 'setIf', 'setElse']
+    const alt = keywords.includes(property) ? alternative[keywords.findIndex(it => it === property)]: property;
+    const camelCase = alt.substring(0, 1).toLowerCase() + alt.substring(1);
+    const capitalised = alt.substring(0, 1).toUpperCase() + alt.substring(1);
+    return { name: alt, camelCase, capitalised };
   }
 
   private otherParameterOptionsFor(objectName: string, name: string, schema: JSONSchema7Definition): { name: string; parameters: Parameter[]; body: Block }[] {
     const propertyName = this.nameForProperty(name);
     const type = this.typefromSchema(schema);
-    const body = Block.create().add(`this.${objectName}.${name} = ${propertyName};`).add('return this;');
-    const parameter = Parameter.create(propertyName, type);
-    const defaultParams = { name: propertyName, parameters: [parameter], body };
+    const body = Block.create().add(`this.${objectName}.${name} = ${propertyName.camelCase};`).add('return this;');
+    const parameter = Parameter.create(propertyName.camelCase, type);
+    const defaultParams = { name: propertyName.camelCase, parameters: [parameter], body };
     if(typeof schema !== 'boolean' && schema.type === 'object' && schema.additionalProperties) {
       const childType = this.typefromSchema(schema.additionalProperties);
-      const childBody = Block.create().add(`this.${objectName} = { ...this.${objectName}, [key]: ${propertyName} };`).add('return this;');
-      return [defaultParams, { name: `add${propertyName}`, parameters: [Parameter.create('key', 'string'), Parameter.create(propertyName, childType)], body: childBody}];
+      const childBody = Block.create().add(`this.${objectName} = { ...this.${objectName}, [key]: ${propertyName.camelCase} };`).add('return this;');
+      return [defaultParams, { name: `add${propertyName.capitalised}`, parameters: [Parameter.create('key', 'string'), Parameter.create(propertyName.camelCase, childType)], body: childBody}];
     }
     return [defaultParams];
   }
