@@ -1,4 +1,5 @@
 import {
+  Block,
   ConstructorParameter, Parameter,
   TopLevelPart,
   TsClass,
@@ -139,21 +140,24 @@ abstract class SchemaInfoBuilder {
   }
 }
 
+export type ReferenceLocation = { location?: string, name: string };
+
 export class SchemaToTsBuilder {
 
 
-  private constructor(private schemas: SchemaInfo[]) {
+  private constructor(private schemas: SchemaInfo[], private nameTransform?: (ref: ReferenceLocation) => ReferenceLocation) {
   }
 
-  private locationFor(reference: string): { location?: string, name: string } {
+  private locationFor(reference: string): ReferenceLocation {
     const parts = reference.split('/');
+    const transform = this.nameTransform ?? (ref => ref);
     const lastPart = parts[parts.length - 1];
     const element = this.schemas.find(it => it.path === reference);
     if(element) {
       const name = element.schema.schema.title ?? lastPart;
-      return { name: name.replace(/[ -]/g,'') };
+      return transform({ name: name.replace(/[ -]/g,'') });
     }
-    return { name: 'unknown' };
+    return transform({ name: 'unknown' });
   }
 
   private typed(): SchemaInfo[] {
@@ -201,6 +205,11 @@ export class SchemaToTsBuilder {
     return file;
   }
 
+  transformNames(transform: (ref: ReferenceLocation) => ReferenceLocation): this {
+    this.nameTransform = transform;
+    return this;
+  }
+
   private typeFromString(schema: JSONSchema7): string {
     return 'string';
   }
@@ -241,14 +250,33 @@ export class SchemaToTsBuilder {
     return property;
   }
 
+  private otherParameterOptionsFor(objectName: string, name: string, schema: JSONSchema7Definition): { name: string; parameters: Parameter[]; body: Block }[] {
+    const propertyName = this.nameForProperty(name);
+    const type = this.typefromSchema(schema);
+    const body = Block.create().add(`this.${objectName}.${name} = ${propertyName};`).add('return this;');
+    const parameter = Parameter.create(propertyName, type);
+    const defaultParams = { name: propertyName, parameters: [parameter], body };
+    if(typeof schema !== 'boolean' && schema.type === 'object' && schema.additionalProperties) {
+      const childType = this.typefromSchema(schema.additionalProperties);
+      const childBody = Block.create().add(`this.${objectName} = { ...this.${objectName}, [key]: ${propertyName} };`).add('return this;');
+      return [defaultParams, { name: `add${propertyName}`, parameters: [Parameter.create('key', 'string'), Parameter.create(propertyName, childType)], body: childBody}];
+    }
+    return [defaultParams];
+  }
+
+  private builderFunctionsFor(objectName: string, property: string, schema: JSONSchema7Definition): TsFunction[] {
+    const parameterOptions = this.otherParameterOptionsFor(objectName, property, schema);
+    return parameterOptions.map(option => TsFunction.create(option.name)
+      .withParameters(...option.parameters)
+      .withReturnType('this')
+      .withBody(option.body));
+  }
+
   private builderMethodsFromObject(name: string, schema: JSONSchema7): TsFunction[] {
     if(schema.properties) {
-      return Object.keys(schema.properties).map(property => {
-        const propertyName = this.nameForProperty(property);
-        return TsFunction.create(propertyName)
-          .withParameters(Parameter.create(propertyName, this.typefromSchema(schema.properties![property])))
-          .withReturnType('this')
-          .withBody(block => block.add(`this.${name}.${property} = ${propertyName};`).add('return this;'))
+      return Object.keys(schema.properties).flatMap(property => {
+        const propertySchema = schema.properties![property];
+        return this.builderFunctionsFor(name, property, propertySchema);
       });
     }
     return [];
@@ -271,7 +299,8 @@ export class SchemaToTsBuilder {
   private typefromSchema(schema: JSONSchema7Definition): string {
     if(typeof schema === 'boolean') return 'unknown';
     const holders = SchemaInfoBuilder.schemaHolderFor(schema);
-    return this.typefromHolder(holders!);
+    const type = this.typefromHolder(holders!);
+    return type;
   }
 
   private anyOf(schemas: JSONSchema7Definition[]): string {
@@ -294,7 +323,7 @@ export class SchemaToTsBuilder {
         if(Array.isArray(type)) {
           return `[${type.map(this.fromGeneralType).join(', ')}]`
         }
-        return `{${Object.keys(type).map(key => `${key}: ${this.fromGeneralType(type[key])}`).join(', ')}`;
+        return `{${Object.keys(type).map(key => `${key}: ${this.fromGeneralType(type[key])}`).join(', ')}}`;
       }
     }
   }
