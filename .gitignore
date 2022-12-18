@@ -5,3 +5,4 @@ junit.xml
 coverage
 .husky
 test-output
+generated-tests
