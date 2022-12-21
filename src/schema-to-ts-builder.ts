@@ -1,230 +1,109 @@
 import {
   Block,
   ConstructorParameter, Parameter,
-  TopLevelPart,
   TsClass,
   TsFile, TsFunction, TypeExp,
 } from '@hexlabs/typescript-generator';
-import {
-  JSONSchema7,
-  JSONSchema7Definition,
-  JSONSchema7Type, JSONSchema7TypeName,
-} from 'json-schema';
-
-export interface ObjectSchema {
-  type: 'object';
-  schema: JSONSchema7;
-}
-
-export interface ArraySchema {
-  type: 'array';
-  schema: JSONSchema7;
-}
-
-export interface Primitive {
-  type: 'string' | 'null' | 'boolean' | 'number' | 'integer';
-  schema: JSONSchema7;
-}
-
-export interface OtherSchema {
-  type: '$ref' | 'allOf' | 'anyOf' | 'oneOf' | 'enum' | 'const' | 'none';
-  schema: JSONSchema7;
-}
-
-export type SchemaHolder = ObjectSchema | ArraySchema | Primitive | OtherSchema;
-
-export interface SchemaInfo {
-  path: string;
-  id?: string;
-  title: string;
-  schema: SchemaHolder;
-}
-
-class Namer {
-  constructor(private num = 0) {
-  }
-  name(): string {
-    this.num = this.num + 1;
-    return 'Unknown' + this.num;
-  }
-}
-
-abstract class SchemaInfoBuilder {
-  static schemaHolderFor(schema: JSONSchema7): SchemaHolder | undefined {
-    if (schema.$ref) return {type: '$ref', schema};
-    if (schema.allOf) return {type: 'allOf', schema};
-    if (schema.anyOf) return {type: 'anyOf', schema};
-    if (schema.oneOf) return {type: 'oneOf', schema};
-    if (schema.enum) return {type: 'enum', schema};
-    if (schema.const) return {type: 'const', schema};
-    return { type: schema.type as any, schema }
-  }
-
-  private static childFrom(path: string, holder: SchemaHolder, key: keyof JSONSchema7, namer: Namer, parent?: string): SchemaInfo[] {
-    const element = holder.schema[key];
-    if(!element) return [];
-    const parentName = this.nameFrom(holder.schema, namer, parent);
-    if(Array.isArray(element)) {
-      const items = element as JSONSchema7Definition[];
-      return items.flatMap((it, index) => this.schemaInfoFrom(it, `${path}/${key}/${index}`, namer, parentName + 'Element' + index))
-    }
-    return Object.keys(element).flatMap(it => this.schemaInfoFrom(element[it],  `${path}/${key}/${it}`, namer, parentName + it.substring(0, 1).toUpperCase() + it.substring(1)));
-  }
-
-  private static childrenFrom(path: string, holder: SchemaHolder, namer: Namer, parent: string): SchemaInfo[] {
-    const keys: (keyof JSONSchema7)[] = ['definitions', '$defs', 'properties', 'propertyNames', 'additionalProperties', 'oneOf', 'anyOf', 'allOf', 'additionalItems'];
-    return keys.flatMap(key => this.childFrom(path, holder, key, namer, parent));
-  }
-
-  static relevantPartsFrom(schema: JSONSchema7): JSONSchema7[] {
-    const {
-      type: types,
-      enum: _enum,
-      const: _const,
-      multipleOf,
-      maximum,
-      exclusiveMaximum,
-      minimum,
-      maxLength,
-      minLength,
-      pattern,
-      items,
-      additionalItems,
-      maxItems,
-      minItems,
-      uniqueItems,
-      contains,
-      maxProperties,
-      minProperties,
-      required,
-      properties,
-      patternProperties,
-      additionalProperties,
-      propertyNames,
-      format,
-      title, description,
-      ...rest
-    } = schema;
-    const root = {...rest, title, description};
-    const others = {
-      enum: _enum,
-      const: _const,
-      multipleOf,
-      maximum,
-      exclusiveMaximum,
-      minimum,
-      maxLength,
-      minLength,
-      pattern,
-      items,
-      additionalItems,
-      maxItems,
-      minItems,
-      uniqueItems,
-      contains,
-      maxProperties,
-      minProperties,
-      required,
-      properties,
-      patternProperties,
-      additionalProperties,
-      propertyNames,
-      format,
-      title,
-      description
-    }
-    return [root, ...(types as JSONSchema7TypeName[]).map(type => ({...others, type: type}))];
-  }
-
-
-
-  static schemaInfoFrom(schema: JSONSchema7Definition, path = '#', namer: Namer, posibleName?: string): SchemaInfo[] {
-    const title = this.nameFrom(schema, namer, posibleName);
-    if(typeof schema === 'boolean') return [{ path, title, schema: { type: 'none', schema: {} } }];
-    if(Array.isArray(schema.type)) {
-      const schemaParts = this.relevantPartsFrom(schema);
-      const refVersion = { type: 'anyOf' as const, schema: { ...schemaParts[0], title, anyOf: schema.type.map((type, index) => ({ $ref: `${path}/anyOf/${index}`, title: `${title}${index}` }))} };
-      const children = schemaParts.flatMap(it => this.childrenFrom(path, this.schemaHolderFor(it)!, namer, title))
-        .filter((it, index, arr) => arr.findIndex(b => it.path === b.path) === index);
-      const updated = [{path, title, schema: refVersion}, ...schemaParts.slice(1).map((schema, index) => ({ path: `${path}/anyOf/${index}`, title:`${title}Type_${index}`, schema: this.schemaHolderFor({...schema, title:`${title}Type_${index}`})!})), ...children];
-      return updated;
-    }
-    const holder = this.schemaHolderFor(schema);
-    return [{path, title, id: schema.$id, schema: holder!}, ...this.childrenFrom(path, holder!, namer, title)];
-  }
-
-  static nameFrom(schema: JSONSchema7Definition, namer: Namer, possibleName?: string): string {
-    if(typeof schema === 'boolean') return possibleName ?? namer.name();
-    const id = schema.$id ? schema.$id.split('/') : undefined;
-    const lastId = id ? id[id.length - 1] : undefined;
-    const name = schema.title ?? lastId ?? possibleName ?? namer.name();
-    return name.endsWith('.json') ? name.substring(0, name.length - 5): name;
-  }
-}
+import { JSONSchema7, JSONSchema7Type } from './json-schema';
+import { NameTransform, SchemaHolder, SchemaInfo, SchemaInfoBuilder } from './schema-info';
 
 export type ReferenceLocation = { location?: string, name: string };
 
 export class SchemaToTsBuilder {
 
 
-  private constructor(private schemas: SchemaInfo[], private namer: Namer, private nameTransform?: (ref: ReferenceLocation) => ReferenceLocation) {
+  private constructor(private schemas: SchemaInfo[], private rootId?: string, private nameTransform?: (ref: ReferenceLocation) => ReferenceLocation) {
   }
 
   private locationFor(reference: string): ReferenceLocation {
-    const element = this.schemas.find(it => it.path === reference || it.id === reference);
+    const element = this.schemas.find(it => it.path === reference || it.holder.schema.$id === reference);
     const transform = this.nameTransform ?? (ref => ref);
-    if(element) {
-      const name = SchemaInfoBuilder.nameFrom(element.schema.schema, this.namer, element.title);
-      return transform({ name: this.nameForProperty(name).capitalised.replace(/[ -\.:]/g,'') });
+    if(element?.typeName) {
+      const location = this.rootId ? (element.holder.schema.$id?.startsWith(this.rootId) ? element.holder.schema.$id!.substring(this.rootId.length) : undefined) : undefined;
+      const name = element.typeName;
+      return transform({ name: this.nameForProperty(name).capitalised.replace(/[ -\.:]/g,''), location: location && (location.endsWith('json') ? location.substring(0, location.length - 5) : location) });
     }
     return transform({ name: 'unknown' });
   }
 
   private typed(): SchemaInfo[] {
-    return this.schemas.filter((it, index, array) => {
-      return it.schema.schema && (it.schema.type === 'object' || it.schema.type === 'anyOf' || it.schema.type === 'oneOf' || it.schema.type === 'allOf' || it.schema.schema.properties || it.schema.schema.additionalProperties || it.schema.schema.title || array.find((item, other) => index !== other && (item.schema.schema?.$ref === it.path || (it.id && (item.schema.schema?.$ref === it.id)))));
-    })
+    return this.schemas.filter((it) => it.hasBuilder).filter((it, index, arr) => arr.findIndex(b => it.path === b.path || (it.typeName && (it.typeName === b.typeName))) === index);
   }
 
-  private defaultValueFor(name: string, schema: SchemaHolder): TypeExp | undefined {
-    const type = this.typefromHolder(schema)
-    if(schema.schema.default !== undefined) {
-      return `${type} = ${SchemaToTsBuilder.fromGeneralType(schema.schema.default)}`;
+  private validValueFor(info: SchemaInfo): TypeExp | undefined {
+    if(info.holder.schema.default !== undefined) {
+      return SchemaToTsBuilder.fromGeneralType(info.holder.schema.default);
     }
-    if(schema.type === 'object') {
-      return `Partial<${name}> = {}`;
-    } else if(schema.type === 'array') {
-      return `${type} = []`;
+    if(info.holder.type === '$ref') {
+      const match = this.schemas.find(it => it.path === info.holder.schema.$ref || (info.holder.schema.$id && info.holder.schema.$id === it.path));
+      if(match) {
+        return this.validValueFor(match);
+      }
+    }
+    if(info.holder.type === 'object') {
+      return '{}';
+    } else if(info.holder.type === 'array') {
+      return '[] as any';
+    } else if(info.holder.type === 'anyOf' || info.holder.type === 'oneOf') {
+      const anyOf = info.holder.type === 'anyOf' ? info.holder.schema.anyOf! : info.holder.schema.oneOf!;
+      const paths = anyOf.map((it, index) => info.path + '/anyOf/' + index)
+      const parts = this.schemas.filter(it => paths.includes(it.path));
+      const res = parts.map(it => this.validValueFor(it)).filter(it => !!it);
+      return res[0]
+    } else if(info.holder.type === 'null') {
+      return 'null';
+    } else if(info.holder.type === 'string') {
+      return `''`;
+    }else if(info.holder.type === 'number') {
+      return '0';
+    }else if(info.holder.type === 'boolean') {
+      return 'false';
     }
     return undefined;
   }
 
-  builderFile(): TopLevelPart[] {
+  private defaultValueFor(name: string, info: SchemaInfo): TypeExp | undefined {
+    const validValue = this.validValueFor(info);
+    if(info.holder.schema.default !== undefined) {
+      const type = this.typefromHolder(info.holder)
+      return `${type} = ${validValue}`;
+    }
+    if(info.holder.type === 'object') {
+      return 'Partial<' + name + `> = {}`;
+    } else if(info.holder.type === 'array') {
+      const type = this.typefromHolder(info.holder)
+      return `${type} = [] as any`;
+    } else if(validValue) {
+      return `${name} = ${validValue}`
+    }
+    return `${name} | undefined = ${validValue}`
+  }
+
+  builderFile(): TsClass[] {
     return this.typed().flatMap(it => {
       const { name } = this.locationFor(it.path);
       const builderName = `${name}Builder`;
-      const methods = this.methodsFrom(name, it.schema);
-      const typeFor = this.defaultValueFor(name, it.schema);
-      if(!typeFor) return [];
-      const c = TsClass.create(builderName)
+      const methods = this.methodsFrom(it);
+      const isObject = it.holder.type === 'object';
+      const c = TsClass.create(builderName + (isObject ? `<T = ${name}>`: ''))
         .withConstructor(
           constructor => constructor
             .isPrivate()
-            .withParameters(ConstructorParameter.create(name, this.defaultValueFor(name, it.schema)).isPrivate())
+            .withParameters(ConstructorParameter.create(name, this.defaultValueFor(name, it)).isPrivate())
         );
       methods.forEach(it => c.withMethod(it));
       return [c
         .withMethod(
           TsFunction.create('build')
-            .withReturnType(name)
+            .withReturnType(isObject ? `{[P in keyof ${name} & keyof T]: ${name}[P];}` : name)
             .withBody(block => block.add(`return this.${name} as ${name};`))
         )
         .withMethod(
           TsFunction.create('create')
             .makeStatic()
-            .withReturnType(builderName)
+            .withReturnType(builderName + (isObject ? '<{}>': ''))
             .withBody(
-              block => block.add(`return new ${builderName}();`)
+              block => block.add(`return new ${builderName}${(isObject ? '<{}>': '')}();`)
             )
         )]
     })
@@ -236,7 +115,7 @@ export class SchemaToTsBuilder {
     const types = this.typed();
     types.forEach(it => {
       const { name } = this.locationFor(it.path);
-      return file.append(`export type ${name} = ${this.typefromHolder(it.schema)}`);
+      return file.append(`export type ${name} = ${this.typefromHolder(it.holder)}`);
     })
     return file;
   }
@@ -262,9 +141,9 @@ export class SchemaToTsBuilder {
     return 'null';
   }
 
-  private additionalProperties(schema?: JSONSchema7Definition): string {
+  private additionalProperties(schema?: JSONSchema7Type): string {
     if(!schema) return '';
-    return `[key: string]: ${this.typefromSchema(schema)}`;
+    return `[key: string]: ${this.typeFromSchema(schema)}`;
   }
 
   private typeFromObject(schema: JSONSchema7): string {
@@ -274,7 +153,7 @@ export class SchemaToTsBuilder {
       return `{${[extras, ...Object.keys(schema.properties ?? {}).map(key => {
         const value = schema.properties![key];
         const isRequired = required.includes(key);
-        return `${key}${isRequired ? '' : '?'}: ${this.typefromSchema(value)}`;
+        return `${key}${isRequired ? '' : '?'}: ${this.typeFromSchema(value)}`;
       })].filter(it => !!it).join(', ')}}`;
     }
     return `{${extras}}`;
@@ -290,34 +169,119 @@ export class SchemaToTsBuilder {
     return { name: alt, camelCase, capitalised };
   }
 
-  private otherParameterOptionsFor(objectName: string, name: string, schema: JSONSchema7Definition): { name: string; parameters: Parameter[]; body: Block }[] {
-    const propertyName = this.nameForProperty(name);
-    const type = this.typefromSchema(schema);
-    const body = Block.create().add(`this.${objectName}.${name} = ${propertyName.camelCase};`).add('return this;');
-    const parameter = Parameter.create(propertyName.camelCase, type);
-    const defaultParams = { name: propertyName.camelCase, parameters: [parameter], body };
-    if(typeof schema !== 'boolean' && schema.type === 'object' && schema.additionalProperties) {
-      const childType = this.typefromSchema(schema.additionalProperties);
-      const childBody = Block.create().add(`this.${objectName}.${propertyName.name} = { ...this.${objectName}?.${propertyName.name}, [key]: ${propertyName.camelCase} };`).add('return this;');
-      return [defaultParams, { name: `add${propertyName.capitalised}`, parameters: [Parameter.create('key', 'string'), Parameter.create(propertyName.camelCase, childType)], body: childBody}];
+  private builderFunctionsFor(schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties', property?: string, variant?: string): TsFunction[] {
+    if(schema.holder.type === 'oneOf'){
+      return schema.holder.schema.oneOf!.map((it, index) => this.findSchema(`${schema.path}/oneOf/${index}`)).filter(it => !!it).flatMap((childSchema) => {
+        const childName = this.nameForProperty(childSchema!.typeName!)
+        return this.builderFunctionsFor(childSchema!, objectName, type, property, childName.capitalised)
+        }
+      )
     }
-    return [defaultParams];
+    if(schema.holder.type === 'anyOf'){
+      return schema.holder.schema.anyOf!.map((it, index) => this.findSchema(`${schema.path}/anyOf/${index}`)).filter(it => !!it).flatMap((childSchema, index) => {
+          const childName = this.nameForProperty(childSchema!.typeName!)
+          return this.builderFunctionsFor(childSchema!, objectName, type, property, childName.capitalised + index)
+        }
+      )
+    }
+    if(schema.holder.type === 'allOf'){
+      return schema.holder.schema.allOf!.map((it, index) => this.findSchema(`${schema.path}/allOf/${index}`)).filter(it => !!it).flatMap((childSchema) => {
+          const childName = this.nameForProperty(childSchema!.typeName!)
+          return this.builderFunctionsFor(childSchema!, objectName, type, property, childName.capitalised)
+        }
+      )
+    }
+    return [this.builderFunctionsForChild(schema, objectName, type, property, variant)];
+  }
+  private builderFunctionsForChild(schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties', property?: string, variant?: string): TsFunction {
+    const funcName = type === 'object' ? `${property}${variant ?? ''}` : `append${variant ?? ''}`;
+    const propertyName = this.nameForProperty(funcName);
+    const block = Block.create();
+    if(schema.hasBuilder) {
+      if(type === 'object') {
+        block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
+          .add(`this.${objectName}.${property} = ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build();`)
+          .add('} else { ');
+      } else if(type === 'additionalProperties') {
+        block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
+          .add(`this.${objectName} = { ...this.${objectName}, [property]: ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build() };`)
+          .add('} else { ');
+      } else if(type === 'array') {
+        block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
+          .add(`this.${objectName} = [ ...this.${objectName}, ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build() ];`)
+          .add('} else { ');
+      }
+    }
+    if(type === 'object') {
+      block.add(`this.${objectName}.${property} = ${propertyName.camelCase};`)
+    } else if(type === 'additionalProperties') {
+      block.add(`this.${objectName} = { ...this.${objectName}, [property]: ${propertyName.camelCase}  };`)
+    } else if(type === 'array') {
+      block.add(`this.${objectName} = [ ...this.${objectName}, ${propertyName.camelCase}  ];`)
+    }
+    if(schema.hasBuilder) {
+      block.add('}');
+    }
+    block.add('return this as any;');
+    if(propertyName.camelCase === 'appendCoreschemametaschema') {
+      console.log('')
+    }
+
+    const func = TsFunction.create(propertyName.camelCase);
+    if(schema.hasBuilder) {
+      func.withParameters(
+        ...(type === 'additionalProperties' ? [Parameter.create('property', 'string')]: []),
+        Parameter.create(propertyName.camelCase, `${schema.typeName} | ((${propertyName.camelCase}: ReturnType<typeof ${schema.typeName}Builder.create>) => ${schema.typeName}Builder)`)
+      )
+    } else {
+      const type = this.typeFromSchema(schema.holder.schema);
+      func.withParameters(...(!property ? [Parameter.create('property', 'string')]: []), Parameter.create(propertyName.camelCase, type));
+    }
+    if(type === 'array') {
+      func.withReturnType('this');
+    } else {
+      func.withReturnType(`${objectName}Builder<T & Pick<${objectName}, '${property}'>>`)
+    }
+    return func.withBody(block);
   }
 
-  private builderFunctionsFor(objectName: string, property: string, schema: JSONSchema7Definition): TsFunction[] {
-    const parameterOptions = this.otherParameterOptionsFor(objectName, property, schema);
-    return parameterOptions.map(option => TsFunction.create(option.name)
-      .withParameters(...option.parameters)
-      .withReturnType('this')
-      .withBody(option.body));
+  private findSchema(path: string): SchemaInfo | undefined {
+    const direct = this.schemas.find(it => it.path === path || (it.holder.schema.$id && it.holder.schema.$id === path));
+    if(direct?.holder.type === '$ref') {
+      return this.findSchema(direct.holder.schema.$ref!);
+    }
+    return direct;
   }
 
-  private builderMethodsFromObject(name: string, schema: JSONSchema7): TsFunction[] {
-    if(schema.properties) {
-      return Object.keys(schema.properties).flatMap(property => {
-        const propertySchema = schema.properties![property];
-        return this.builderFunctionsFor(name, property, propertySchema);
-      });
+  private builderMethodsFromAdditionalProperties(info: SchemaInfo): TsFunction[] {
+    if(info.holder.schema.additionalProperties) {
+      const schema = this.findSchema(info.path + '/additionalProperties');
+      if(schema)
+        return this.builderFunctionsFor(schema, info.typeName!, 'additionalProperties');
+    }
+    return [];
+  }
+
+  private builderMethodsFromObject(info: SchemaInfo): TsFunction[] {
+    const additionalPropsFunctions = this.builderMethodsFromAdditionalProperties(info);
+    if(info.holder.schema.properties) {
+      return [...additionalPropsFunctions, ...Object.keys(info.holder.schema.properties).flatMap(property => {
+        const schema = this.findSchema(info.path + '/properties/' + property);
+        if(schema)
+          return this.builderFunctionsFor(schema, info.typeName!, 'object', property);
+        return [];
+      })];
+    }
+    return additionalPropsFunctions;
+  }
+
+  private builderMethodsFromArray(info: SchemaInfo): TsFunction[] {
+    if(!Array.isArray(info.holder.schema.items)) {
+      const schema = this.findSchema(info.path + '/items');
+      if(schema)
+        return this.builderFunctionsFor(schema, info.typeName!, 'array');
+    } else {
+      //TODO solve for tuples
     }
     return [];
   }
@@ -325,33 +289,35 @@ export class SchemaToTsBuilder {
   private typeFromArray(schema: JSONSchema7): string {
     if(!schema.items || typeof schema.items === 'boolean') return 'unknown[]';
     if(Array.isArray(schema.items)) {
-      return `[${schema.items.map(it => this.typefromSchema(it)).join(', ')}]`;
+      return `[${schema.items.map(it => this.typeFromSchema(it)).join(', ')}]`;
     }
-    return `Array<${this.typefromSchema(schema.items)}>`
+    return `Array<${this.typeFromSchema(schema.items)}>`
   }
 
   private typeFromRef(schema: JSONSchema7): string {
     const reference = schema.$ref!;
-    const { name } = this.locationFor(reference);
-    return name;
+    const referenced = this.findSchema(reference);
+    if(!referenced) return 'unknown';
+    if(referenced.hasBuilder) return referenced.typeName!;
+    return this.typefromHolder(referenced.holder);
   }
 
-  private typefromSchema(schema: JSONSchema7Definition): string {
+  private typeFromSchema(schema: JSONSchema7Type): string {
     if(typeof schema === 'boolean') return 'unknown';
     const holders = SchemaInfoBuilder.schemaHolderFor(schema);
     const type = this.typefromHolder(holders!);
     return type;
   }
 
-  private anyOf(schemas: JSONSchema7Definition[]): string {
-    return schemas.map(it => this.typefromSchema(it)).join(' | ');
+  private anyOf(schemas: JSONSchema7Type[]): string {
+    return schemas.map(it => this.typeFromSchema(it)).join(' | ');
   }
 
-  private allOf(schemas: JSONSchema7Definition[]): string {
-    return schemas.map(it => this.typefromSchema(it)).join(' & ');
+  private allOf(schemas: JSONSchema7Type[]): string {
+    return schemas.map(it => this.typeFromSchema(it)).join(' & ');
   }
 
-  static fromGeneralType(type: JSONSchema7Type): string {
+  static fromGeneralType(type: unknown): string {
     if(type === null) return 'null';
     if(type === undefined) return 'undefined';
     switch(typeof type) {
@@ -368,7 +334,7 @@ export class SchemaToTsBuilder {
     }
   }
 
-  static enum(types: JSONSchema7Type[]): string {
+  static enum(types: unknown[]): string {
     return types.map(this.fromGeneralType).join(' | ');
   }
 
@@ -378,6 +344,7 @@ export class SchemaToTsBuilder {
 
   private typefromHolder(holder: SchemaHolder): string {
     switch(holder.type) {
+      case 'object': return this.typeFromObject(holder.schema);
       case '$ref': return this.typeFromRef(holder.schema);
       case 'anyOf': return this.anyOf(holder.schema.anyOf!);
       case 'allOf': return this.allOf(holder.schema.allOf!);
@@ -393,15 +360,16 @@ export class SchemaToTsBuilder {
     }
   }
 
-  private methodsFrom(name: string, holder: SchemaHolder): TsFunction[] {
-    switch(holder.type) {
-      case 'object': return this.builderMethodsFromObject(name, holder.schema)
+  private methodsFrom(info: SchemaInfo): TsFunction[] {
+    switch(info.holder.type) {
+      case 'object': return this.builderMethodsFromObject(info);
+      case 'array': return this.builderMethodsFromArray(info);
       default: return [];
     }
   }
 
 
-  static create(schema: JSONSchema7): SchemaToTsBuilder {
-    return new SchemaToTsBuilder(SchemaInfoBuilder.schemaInfoFrom(schema, '#', new Namer()), new Namer());
+  static create(schema: JSONSchema7, rootId?: string, nameTransform: NameTransform = name => name): SchemaToTsBuilder {
+    return new SchemaToTsBuilder(SchemaInfoBuilder.schemaInfoFrom(nameTransform, SchemaInfoBuilder.extractSchemaInfoFrom(schema)), rootId);
   }
 }
