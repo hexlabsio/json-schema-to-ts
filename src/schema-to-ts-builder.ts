@@ -153,9 +153,14 @@ export class SchemaToTsBuilder {
       )
     }
     if(schema.holder.type === 'allOf'){
-      return schema.holder.schema.allOf!.map((it, index) => this.findSchema(`${schema.path}/allOf/${index}`)).filter(it => !!it).flatMap((childSchema) => {
+      const allTypable = schema.holder.schema.allOf!.filter(it => Object.keys(it).find(key => ['$ref', 'properties', 'items', 'type', 'additionalProperties'].includes(key)));
+      if(allTypable.length === 1) {
+        const childSchema = this.findSchema(schema.path + '/allOf/0');
+        return [this.builderFunctionsForChild(childSchema!, objectName, type, imports, currentLocation, property, variant)];
+      }
+      return allTypable.map((it, index) => this.findSchema(`${schema.path}/allOf/${index}`)).filter(it => !!it).flatMap((childSchema, index) => {
           const childName = this.nameForProperty(childSchema!.typeName!)
-          return this.builderFunctionsFor(childSchema!, objectName, type, imports, currentLocation, property, childName.capitalised)
+          return this.builderFunctionsFor(childSchema!, objectName, type, imports, currentLocation, property, childName.capitalised + index)
         }
       )
     }
@@ -167,11 +172,13 @@ export class SchemaToTsBuilder {
     const typeName = this.nameForProperty(objectName).camelCase;
     const block = Block.create();
     if(schema.hasBuilder) {
-      const importing =  [...Dir.absoluteLocationFor(schema.location), schema.typeName!];
-      const current = Dir.absoluteLocationFor(currentLocation);
-      const relative = Dir.importLocation(current, importing);
-      imports.addImport(schema.typeName! + 'Builder', relative);
-      imports.addImport(schema.typeName!, relative);
+      if(schema.typeName !== objectName) {
+        const importing = [...Dir.absoluteLocationFor(schema.location), schema.typeName!];
+        const current = Dir.absoluteLocationFor(currentLocation);
+        const relative = Dir.importLocation(current, importing);
+        imports.addImport(schema.typeName! + 'Builder', relative);
+        imports.addImport(schema.typeName!, relative);
+      }
       if(type === 'object') {
         block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
           .add(`this.${typeName}.${property} = ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build();`)
@@ -286,7 +293,8 @@ export class SchemaToTsBuilder {
   }
 
   private allOf(path: string, schemas: JSONSchema7Type[], imports: Imports, location: Dir): string {
-    return schemas.map((it, index) => this.typeFromSchema(`${path}/allOf/${index}`, it, imports, location)).join(' & ');
+    const allTypable = schemas.filter(it => Object.keys(it).find(key => ['$ref', 'properties', 'items', 'type', 'additionalProperties'].includes(key)));
+    return allTypable.map((it, index) => this.typeFromSchema(`${path}/allOf/${index}`, it, imports, location)).join(' & ');
   }
 
   private oneOf(path: string, schemas: JSONSchema7Type[], imports: Imports, location: Dir): string {
