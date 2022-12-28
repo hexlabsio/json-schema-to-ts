@@ -5,16 +5,19 @@ import {
   TsFile, TsFunction, TypeExp,
 } from '@hexlabs/typescript-generator';
 import { JSONSchema7, JSONSchema7Type } from './json-schema';
-import { NameTransform, SchemaHolder, SchemaInfo, SchemaInfoBuilder } from './schema-info';
+import { BuilderInfo, NameTransform, SchemaHolder, SchemaInfo, SchemaInfoBuilder } from './schema-info';
+
+type AnyOf = { type: 'any'; schema: SchemaPart[] }
+type AllOf = { type: 'all'; schema: SchemaPart[] }
+type SchemaPart = AllOf | AnyOf | { type: 'one'; schema: SchemaInfo }
 
 export class SchemaToTsBuilder {
 
   private constructor(public schemas: SchemaInfo[], private parent: Dir) {
   }
 
-
-  private typed(): SchemaInfo[] {
-    return this.schemas.filter((it) => it.hasBuilder).filter((it, index, arr) => arr.findIndex(b => it.path === b.path || (it.typeName && (it.typeName === b.typeName))) === index);
+  private typed(): BuilderInfo[] {
+    return this.schemas.filter((it): it is BuilderInfo => it.hasBuilder).filter((it, index, arr) => arr.findIndex(b => it.path === b.path || (it.typeName && (it.typeName === b.typeName))) === index);
   }
 
   private validValueFor(info: SchemaInfo): TypeExp | undefined {
@@ -31,12 +34,6 @@ export class SchemaToTsBuilder {
       return '{}';
     } else if(info.holder.type === 'array') {
       return '[] as any';
-    } else if(info.holder.type === 'anyOf' || info.holder.type === 'oneOf') {
-      const anyOf = info.holder.type === 'anyOf' ? info.holder.schema.anyOf! : info.holder.schema.oneOf!;
-      const paths = anyOf.map((it, index) => info.path + '/anyOf/' + index)
-      const parts = this.schemas.filter(it => paths.includes(it.path));
-      const res = parts.map(it => this.validValueFor(it)).filter(it => !!it);
-      return res[0]
     } else if(info.holder.type === 'null') {
       return 'null';
     } else if(info.holder.type === 'string') {
@@ -64,28 +61,36 @@ export class SchemaToTsBuilder {
     return `${name} | undefined = ${validValue}`
   }
 
-  builderFor(schemaInfo: SchemaInfo, imports: Imports, current: Dir): TsClass {
+  builderFor(schemaInfo: BuilderInfo, imports: Imports, current: Dir): TsClass {
     const builderName = `${schemaInfo.typeName!}Builder`;
     const typeName = this.nameForProperty(schemaInfo.typeName!).camelCase;
     const methods = this.methodsFrom(schemaInfo, imports, current);
+
     const isObject = schemaInfo.holder.type === 'object';
-    const c = TsClass.create(builderName + (isObject ? `<T = ${schemaInfo.typeName!}>`: ''))
+    const isAnyOf = schemaInfo.holder.type === 'anyOf';
+    const c = TsClass.create(builderName + ((isObject || isAnyOf) ? `<T = ${schemaInfo.typeName}>`: ''))
       .withConstructor(
         constructor => constructor
           .isPrivate()
-          .withParameters(ConstructorParameter.create(typeName, this.defaultValueFor(schemaInfo.typeName!, schemaInfo)).isPrivate())
+          .withParameters(ConstructorParameter.create(typeName, this.defaultValueFor(schemaInfo.typeName, schemaInfo)).isPrivate())
       );
+    c.withMethod(
+      TsFunction.create('as')
+      .withReturnType(builderName)
+        .withParameters(Parameter.create(typeName, schemaInfo.typeName))
+      .withBody(block => block.add(`this.${typeName} = ${typeName};`).add(`return this as any;`))
+    )
     methods.forEach(it => c.withMethod(it));
     return c
       .withMethod(
         TsFunction.create('build')
-          .withReturnType(isObject ? `{[P in keyof ${schemaInfo.typeName!} & keyof T]: ${schemaInfo.typeName!}[P];}` : schemaInfo.typeName!)
-          .withBody(block => block.add(`return this.${typeName} as ${schemaInfo.typeName!};`))
+          .withReturnType(isObject ? `{[P in keyof ${schemaInfo.typeName!} & keyof T]: ${schemaInfo.typeName}[P];}` : isAnyOf ? 'T' : schemaInfo.typeName)
+          .withBody(block => block.add(`return this.${typeName} as any;`))
       )
       .withMethod(
         TsFunction.create('create')
           .makeStatic()
-          .withReturnType(builderName + (isObject ? '<{}>': ''))
+          .withReturnType(builderName + ((isObject || isAnyOf) ? '<{}>': ''))
           .withBody(
             block => block.add(`return new ${builderName}${(isObject ? '<{}>': '')}();`)
           )
@@ -137,42 +142,15 @@ export class SchemaToTsBuilder {
     return { name: alt, camelCase, capitalised };
   }
 
-  private builderFunctionsFor(schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties', imports: Imports, currentLocation: Dir, property?: string, variant?: string): TsFunction[] {
-    if(schema.holder.type === 'oneOf'){
-      return schema.holder.schema.oneOf!.map((it, index) => this.findSchema(`${schema.path}/oneOf/${index}`)).filter(it => !!it).flatMap((childSchema) => {
-        const childName = this.nameForProperty(childSchema!.typeName!)
-        return this.builderFunctionsFor(childSchema!, objectName, type, imports, currentLocation, property, childName.capitalised)
-        }
-      )
-    }
-    if(schema.holder.type === 'anyOf'){
-      return schema.holder.schema.anyOf!.map((it, index) => this.findSchema(`${schema.path}/anyOf/${index}`)).filter(it => !!it).flatMap((childSchema, index) => {
-          const childName = this.nameForProperty(childSchema!.typeName!)
-          return this.builderFunctionsFor(childSchema!, objectName, type, imports, currentLocation, property, childName.capitalised + index)
-        }
-      )
-    }
-    if(schema.holder.type === 'allOf'){
-      const allTypable = schema.holder.schema.allOf!.filter(it => Object.keys(it).find(key => ['$ref', 'properties', 'items', 'type', 'additionalProperties'].includes(key)));
-      if(allTypable.length === 1) {
-        const childSchema = this.findSchema(schema.path + '/allOf/0');
-        return [this.builderFunctionsForChild(childSchema!, objectName, type, imports, currentLocation, property, variant)];
-      }
-      return allTypable.map((it, index) => this.findSchema(`${schema.path}/allOf/${index}`)).filter(it => !!it).flatMap((childSchema, index) => {
-          const childName = this.nameForProperty(childSchema!.typeName!)
-          return this.builderFunctionsFor(childSchema!, objectName, type, imports, currentLocation, property, childName.capitalised + index)
-        }
-      )
-    }
-    return [this.builderFunctionsForChild(schema, objectName, type, imports, currentLocation, property, variant)];
-  }
-  private builderFunctionsForChild(schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties', imports: Imports, currentLocation: Dir, property?: string, variant?: string): TsFunction {
-    const funcName = type === 'object' ? `${property}${variant ?? ''}` : `append${variant ?? ''}`;
-    const propertyName = this.nameForProperty(funcName);
+  private builderFunctionsFor(schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties' | 'anyOf', imports: Imports, currentLocation: Dir, property?: string, variant?: string): TsFunction {
+    const funcName = (type === 'object' || type === 'anyOf') ? `${property}${variant ?? ''}` : `append${variant ?? ''}`;
+    const possiblePropertyName = this.nameForProperty(funcName);
     const typeName = this.nameForProperty(objectName).camelCase;
+    const propertyName = (possiblePropertyName.camelCase === typeName ? this.nameForProperty(`_${typeName}`) : possiblePropertyName);
+
     const block = Block.create();
     if(schema.hasBuilder) {
-      if(schema.typeName !== objectName) {
+      if(schema.typeName !== typeName) {
         const importing = [...Dir.absoluteLocationFor(schema.location), schema.typeName!];
         const current = Dir.absoluteLocationFor(currentLocation);
         const relative = Dir.importLocation(current, importing);
@@ -182,6 +160,10 @@ export class SchemaToTsBuilder {
       if(type === 'object') {
         block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
           .add(`this.${typeName}.${property} = ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build();`)
+          .add('} else { ');
+      } else if(type === 'anyOf') {
+        block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
+          .add(`this.${typeName} = ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build();`)
           .add('} else { ');
       } else if(type === 'additionalProperties') {
         block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
@@ -199,6 +181,8 @@ export class SchemaToTsBuilder {
       block.add(`this.${typeName} = { ...this.${typeName}, [property]: ${propertyName.camelCase}  };`)
     } else if(type === 'array') {
       block.add(`this.${typeName} = [ ...this.${typeName}, ${propertyName.camelCase}  ];`)
+    } else if(type === 'anyOf') {
+      block.add(`this.${typeName} = ${propertyName.camelCase};`)
     }
     if(schema.hasBuilder) {
       block.add('}');
@@ -220,6 +204,8 @@ export class SchemaToTsBuilder {
     }
     if(type === 'array') {
       func.withReturnType('this');
+    } else if(type === 'anyOf') {
+      func.withReturnType(`${objectName}Builder`)
     } else {
       func.withReturnType(`${objectName}Builder<T & Pick<${objectName}, ${property ? `'${property}'` : 'string'}>>`)
     }
@@ -227,18 +213,34 @@ export class SchemaToTsBuilder {
   }
 
   private findSchema(path: string): SchemaInfo | undefined {
-    const direct = this.schemas.find(it => it.path === path || (it.holder.schema.$id && it.holder.schema.$id === path));
-    if(direct?.holder.type === '$ref') {
-      return this.findSchema(direct.holder.schema.$ref!);
-    }
-    return direct;
+    return SchemaInfoBuilder.findSchema(this.schemas, path);
+  }
+
+  private builderMethodsFromAnyOf(info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+    return info.holder.schema.anyOf!.flatMap((_, index) => {
+      const schema = this.findSchema(`${info.path}/anyOf/${index}`);
+      if(schema && schema.hasBuilder) {
+        return this.builderFunctionsFor(schema, info.typeName, 'anyOf', imports, currentLocation, schema.typeName);
+      }
+      return [];
+    });
+  }
+
+  private builderMethodsFromOneOf(info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+    return info.holder.schema.oneOf!.flatMap((_, index) => {
+      const schema = this.findSchema(`${info.path}/oneOf/${index}`);
+      if(schema && schema.hasBuilder) {
+        return this.builderFunctionsFor(schema, info.typeName, 'anyOf', imports, currentLocation, schema.typeName);
+      }
+      return [];
+    })
   }
 
   private builderMethodsFromAdditionalProperties(info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     if(info.holder.schema.additionalProperties) {
       const schema = this.findSchema(info.path + '/additionalProperties');
       if(schema)
-        return this.builderFunctionsFor(schema, info.typeName!, 'additionalProperties', imports, currentLocation);
+        return [this.builderFunctionsFor(schema, info.typeName!, 'additionalProperties', imports, currentLocation)];
     }
     return [];
   }
@@ -250,7 +252,9 @@ export class SchemaToTsBuilder {
         const schema = this.findSchema(info.path + '/properties/' + property);
         if(schema)
           return this.builderFunctionsFor(schema, info.typeName!, 'object', imports, currentLocation, property);
-        return [];
+        const holder = SchemaInfoBuilder.schemaHolderFor(info.holder.schema.properties![property] as any);
+        const holderInfo: SchemaInfo = { path: '', holder, hasBuilder: false, location: currentLocation };
+        return this.builderFunctionsFor(holderInfo, info.typeName!, 'object', imports, currentLocation, property);
       })];
     }
     return additionalPropsFunctions;
@@ -260,7 +264,7 @@ export class SchemaToTsBuilder {
     if(!Array.isArray(info.holder.schema.items)) {
       const schema = this.findSchema(info.path + '/items');
       if(schema)
-        return this.builderFunctionsFor(schema, info.typeName!, 'array', imports, currentLocation);
+        return [this.builderFunctionsFor(schema, info.typeName!, 'array', imports, currentLocation)];
     } else {
       //TODO solve for tuples
     }
@@ -356,24 +360,26 @@ export class SchemaToTsBuilder {
     }
   }
 
-  private methodsFrom(info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+  private methodsFrom(info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     switch(info.holder.type) {
       case 'object': return this.builderMethodsFromObject(info, imports, currentLocation);
       case 'array': return this.builderMethodsFromArray(info, imports, currentLocation);
+      case 'anyOf': return this.builderMethodsFromAnyOf(info, imports, currentLocation);
+      case 'oneOf': return this.builderMethodsFromOneOf(info, imports, currentLocation);
       default: return [];
     }
   }
   static createWithOthers(otherSchemas: Record<string, JSONSchema7>, schema: JSONSchema7, location: string, nameTransform: NameTransform = (name, location) => ({ name, location })): SchemaToTsBuilder {
     const dir = Dir.create(location);
     const others = Object.keys(otherSchemas).flatMap(key => {
-      return SchemaInfoBuilder.schemaInfoFrom(dir, dir, nameTransform, SchemaInfoBuilder.extractSchemaInfoFrom(otherSchemas[key], key), key);
-    })
-    return new SchemaToTsBuilder([...others, ...SchemaInfoBuilder.schemaInfoFrom(dir, dir, nameTransform, SchemaInfoBuilder.extractSchemaInfoFrom(schema, '#'))], dir);
+      return SchemaInfoBuilder.schemaInfo(dir, otherSchemas[key], key, nameTransform)
+    });
+    return new SchemaToTsBuilder([...others, ...SchemaInfoBuilder.schemaInfo(dir, schema, '#', nameTransform)], dir);
   }
 
   static create(schema: JSONSchema7, location: string, nameTransform: NameTransform = (name, location) => ({ name, location })): SchemaToTsBuilder {
     const dir = Dir.create(location);
     // const jschema = SchemaInfoBuilder.schemaInfoFrom(dir, dir, nameTransform, SchemaInfoBuilder.extractSchemaInfoFrom(jsonSchema as any, 'http://json-schema.org/draft-07/schema#'), 'http://json-schema.org/draft-07/schema#');
-    return new SchemaToTsBuilder(SchemaInfoBuilder.schemaInfoFrom(dir, dir, nameTransform, SchemaInfoBuilder.extractSchemaInfoFrom(schema, '#')), dir);
+    return new SchemaToTsBuilder(SchemaInfoBuilder.schemaInfo(dir, schema, '#', nameTransform), dir);
   }
 }

@@ -7,6 +7,11 @@ export class TestRefObjectBuilder<T = TestRefObject> {
 
   private constructor(private testRefObject: Partial<TestRefObject> = {}){}
 
+  as(testRefObject: TestRefObject): TestRefObjectBuilder {
+    this.testRefObject = testRefObject;
+    return this as any;
+  }
+
   a(a: Xyz | ((a: ReturnType<typeof XyzBuilder.create>) => XyzBuilder)): TestRefObjectBuilder<T & Pick<TestRefObject, 'a'>> {
     if (typeof a === 'function'){
       this.testRefObject.a = a(XyzBuilder.create()).build();
@@ -17,7 +22,7 @@ export class TestRefObjectBuilder<T = TestRefObject> {
   }
 
   build(): {[P in keyof TestRefObject & keyof T]: TestRefObject[P];} {
-    return this.testRefObject as TestRefObject;
+    return this.testRefObject as any;
   }
 
   static create(): TestRefObjectBuilder<{}> {

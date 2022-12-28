@@ -1,25 +1,32 @@
-export type Part2 = {a?: string, b?: number}
+import { Part1, Part1Builder } from './Part1'
+
+
+export type Part2 = Part1 | string
 
 export class Part2Builder<T = Part2> {
 
-  private constructor(private part2: Partial<Part2> = {}){}
+  private constructor(private part2: Part2 | undefined = undefined){}
 
-  a(a: string): Part2Builder<T & Pick<Part2, 'a'>> {
-    this.part2.a = a;
+  as(part2: Part2): Part2Builder {
+    this.part2 = part2;
     return this as any;
   }
 
-  b(b: number): Part2Builder<T & Pick<Part2, 'b'>> {
-    this.part2.b = b;
+  part1(part1: Part1 | ((part1: ReturnType<typeof Part1Builder.create>) => Part1Builder)): Part2Builder {
+    if (typeof part1 === 'function'){
+      this.part2 = part1(Part1Builder.create()).build();
+    } else {
+      this.part2 = part1;
+    }
     return this as any;
   }
 
-  build(): {[P in keyof Part2 & keyof T]: Part2[P];} {
-    return this.part2 as Part2;
+  build(): T {
+    return this.part2 as any;
   }
 
   static create(): Part2Builder<{}> {
-    return new Part2Builder<{}>();
+    return new Part2Builder();
   }
 
 }
