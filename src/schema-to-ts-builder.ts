@@ -199,8 +199,8 @@ export class SchemaToTsBuilder {
         Parameter.create(propertyName.camelCase, `${schema.typeName} | ((${propertyName.camelCase}: ReturnType<typeof ${schema.typeName}Builder.create>) => ${schema.typeName}Builder)`)
       )
     } else {
-      const type = this.typeFromSchema('', schema.holder.schema, {} as any, {} as any);
-      func.withParameters(...(!property ? [Parameter.create('property', 'string')]: []), Parameter.create(propertyName.camelCase, type));
+      const itemType = this.typeFromSchema('', schema.holder.schema, {} as any, {} as any);
+      func.withParameters(...((!property && type !== 'array') ? [Parameter.create('property', 'string')]: []), Parameter.create(propertyName.camelCase, itemType));
     }
     if(type === 'array') {
       func.withReturnType('this');

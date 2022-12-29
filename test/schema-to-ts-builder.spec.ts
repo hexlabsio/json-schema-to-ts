@@ -7,8 +7,7 @@ import { TestAnyOptionsBuilder } from './schemas/any-of/TestAnyOptions';
 import { TestRefBuilder } from './schemas/ref-model';
 import { simple } from './schemas/simple';
 import { simpleRequired } from './schemas/simple-required';
-import { ref } from './schemas/ref';
-import { refObject } from './schemas/ref-object';
+import { ref, refObject, refArray } from './schemas/ref';
 import { allOf, primitiveAllOf } from './schemas/all-of/allOf';
 import { dualType } from './schemas/dual-type/dual-type';
 import { anyOf, anyOfWrapped, anyOfWrappedAdditional, anyOfRef } from './schemas/any-of/anyOf';
@@ -54,6 +53,13 @@ describe('Simple Schemas', () => {
     const files = outputDir.get().files;
     expect(files.length).toEqual(2);
     compare(files[0], 'ref-object-model');
+  });
+
+  it('should model ref array', () => {
+    const outputDir = SchemaToTsBuilder.create(refArray, testOutput).modelFiles();
+    const files = outputDir.get().files;
+    expect(files.length).toEqual(2);
+    compare(files[1], 'ref-array-model');
   });
 
   it('should model allOf', () => {
