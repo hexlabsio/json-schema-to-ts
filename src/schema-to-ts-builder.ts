@@ -101,15 +101,23 @@ export class SchemaToTsBuilder {
     const types = this.typed();
     types.forEach(it => {
       const imports = Imports.create()
+      const builderImports = Imports.create();
       const type = this.typeFromInfo(it, imports, it.location, true);
-      const builder = this.builderFor(it, imports, it.location)
+      const builders = it.location.getChildAt('builders');
+      const builder = this.builderFor(it, builderImports, builders);
       const importLines = imports.getImports();
+      builderImports.addImport(it.typeName, `../${it.typeName}`);
+      const builderImportLines = builderImports.getImports();
       const file = TsFile.create(it.typeName! + '.ts')
         .append(importLines);
       if(importLines )file.append('\n');
-        file.append(`export type ${it.typeName!} = ${type}\n`)
-        .append(builder, { exported: true })
+        file.append(`export type ${it.typeName!} = ${type}\n`);
       it.location.add(file);
+        const builderFile = TsFile.create(it.typeName! + '.ts')
+          .append(builderImportLines);
+      if(builderImportLines)builderFile.append('\n');
+      builderFile.append(builder, { exported: true });
+      builders.add(builderFile);
     });
     return this.parent;
   }
@@ -150,13 +158,13 @@ export class SchemaToTsBuilder {
 
     const block = Block.create();
     if(schema.hasBuilder) {
-      if(schema.typeName !== typeName) {
-        const importing = [...Dir.absoluteLocationFor(schema.location), schema.typeName!];
-        const current = Dir.absoluteLocationFor(currentLocation);
-        const relative = Dir.importLocation(current, importing);
-        imports.addImport(schema.typeName! + 'Builder', relative);
-        imports.addImport(schema.typeName!, relative);
-      }
+      const importing = [...Dir.absoluteLocationFor(schema.location), schema.typeName!];
+      const importingBuilder = [...Dir.absoluteLocationFor(schema.location), 'builders', schema.typeName!];
+      const current = Dir.absoluteLocationFor(currentLocation);
+      const relative = Dir.importLocation(current, importing);
+      const relativeBuilder = Dir.importLocation(current, importingBuilder);
+      imports.addImport(schema.typeName! + 'Builder', relativeBuilder);
+      imports.addImport(schema.typeName!, relative);
       if(type === 'object') {
         block.add(`if (typeof ${propertyName.camelCase} === 'function'){ `)
           .add(`this.${typeName}.${property} = ${propertyName.camelCase}(${schema.typeName!}Builder.create()).build();`)
@@ -369,6 +377,7 @@ export class SchemaToTsBuilder {
       default: return [];
     }
   }
+
   static createWithOthers(otherSchemas: Record<string, JSONSchema7>, schema: JSONSchema7, location: string, nameTransform: NameTransform = (name, location) => ({ name, location })): SchemaToTsBuilder {
     const dir = Dir.create(location);
     const others = Object.keys(otherSchemas).flatMap(key => {
@@ -379,7 +388,6 @@ export class SchemaToTsBuilder {
 
   static create(schema: JSONSchema7, location: string, nameTransform: NameTransform = (name, location) => ({ name, location })): SchemaToTsBuilder {
     const dir = Dir.create(location);
-    // const jschema = SchemaInfoBuilder.schemaInfoFrom(dir, dir, nameTransform, SchemaInfoBuilder.extractSchemaInfoFrom(jsonSchema as any, 'http://json-schema.org/draft-07/schema#'), 'http://json-schema.org/draft-07/schema#');
     return new SchemaToTsBuilder(SchemaInfoBuilder.schemaInfo(dir, schema, '#', nameTransform), dir);
   }
 }
