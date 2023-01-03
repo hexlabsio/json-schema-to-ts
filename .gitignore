@@ -6,3 +6,4 @@ coverage
 .husky
 test-output
 generated-tests
+output
