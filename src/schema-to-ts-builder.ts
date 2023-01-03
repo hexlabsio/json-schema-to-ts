@@ -61,10 +61,10 @@ export class SchemaToTsBuilder {
     return `${name} | undefined = ${validValue}`
   }
 
-  builderFor(schemaInfo: BuilderInfo, imports: Imports, current: Dir): TsClass {
+  builderFor(inline: boolean, schemaInfo: BuilderInfo, imports: Imports, current: Dir): TsClass {
     const builderName = `${schemaInfo.typeName!}Builder`;
     const typeName = this.nameForProperty(schemaInfo.typeName!).camelCase;
-    const methods = this.methodsFrom(schemaInfo, imports, current);
+    const methods = this.methodsFrom(inline, schemaInfo, imports, current);
 
     const isObject = schemaInfo.holder.type === 'object';
     const isAnyOf = schemaInfo.holder.type === 'anyOf';
@@ -97,27 +97,32 @@ export class SchemaToTsBuilder {
       );
   }
 
-  modelFiles(): Dir {
+  modelFiles(inlineBuilders = false): Dir {
     const types = this.typed();
     types.forEach(it => {
       const imports = Imports.create()
-      const builderImports = Imports.create();
+      const builderImports = inlineBuilders ? imports : Imports.create();
       const type = this.typeFromInfo(it, imports, it.location, true);
-      const builders = it.location.getChildAt('builders');
-      const builder = this.builderFor(it, builderImports, builders);
+      const builders = inlineBuilders ? it.location : it.location.getChildAt('builders');
+      const builder = this.builderFor(inlineBuilders, it, builderImports, builders);
       const importLines = imports.getImports();
-      builderImports.addImport(it.typeName, `../${it.typeName}`);
-      const builderImportLines = builderImports.getImports();
+      if(!inlineBuilders) builderImports.addImport(it.typeName, `../${it.typeName}`);
       const file = TsFile.create(it.typeName! + '.ts')
         .append(importLines);
       if(importLines )file.append('\n');
         file.append(`export type ${it.typeName!} = ${type}\n`);
+        if(inlineBuilders) {
+          file.append(builder, {exported: true});
+        }
       it.location.add(file);
+      if(!inlineBuilders) {
+        const builderImportLines = builderImports.getImports();
         const builderFile = TsFile.create(it.typeName! + '.ts')
           .append(builderImportLines);
-      if(builderImportLines)builderFile.append('\n');
-      builderFile.append(builder, { exported: true });
-      builders.add(builderFile);
+        if (builderImportLines) builderFile.append('\n');
+        builderFile.append(builder, {exported: true});
+        builders.add(builderFile);
+      }
     });
     return this.parent;
   }
@@ -150,7 +155,7 @@ export class SchemaToTsBuilder {
     return { name: alt, camelCase, capitalised };
   }
 
-  private builderFunctionsFor(schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties' | 'anyOf', imports: Imports, currentLocation: Dir, property?: string, variant?: string): TsFunction {
+  private builderFunctionsFor(inline: boolean, schema: SchemaInfo, objectName: string, type: 'object' | 'array' | 'additionalProperties' | 'anyOf', imports: Imports, currentLocation: Dir, property?: string, variant?: string): TsFunction {
     const funcName = (type === 'object' || type === 'anyOf') ? `${property}${variant ?? ''}` : `append${variant ?? ''}`;
     const possiblePropertyName = this.nameForProperty(funcName);
     const typeName = this.nameForProperty(objectName).camelCase;
@@ -159,7 +164,7 @@ export class SchemaToTsBuilder {
     const block = Block.create();
     if(schema.hasBuilder) {
       const importing = [...Dir.absoluteLocationFor(schema.location), schema.typeName!];
-      const importingBuilder = [...Dir.absoluteLocationFor(schema.location), 'builders', schema.typeName!];
+      const importingBuilder = [...Dir.absoluteLocationFor(schema.location), ...(inline ? []: ['builders']), schema.typeName!];
       const current = Dir.absoluteLocationFor(currentLocation);
       const relative = Dir.importLocation(current, importing);
       const relativeBuilder = Dir.importLocation(current, importingBuilder);
@@ -224,55 +229,55 @@ export class SchemaToTsBuilder {
     return SchemaInfoBuilder.findSchema(this.schemas, path);
   }
 
-  private builderMethodsFromAnyOf(info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+  private builderMethodsFromAnyOf(inline: boolean, info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     return info.holder.schema.anyOf!.flatMap((_, index) => {
       const schema = this.findSchema(`${info.path}/anyOf/${index}`);
       if(schema && schema.hasBuilder) {
-        return this.builderFunctionsFor(schema, info.typeName, 'anyOf', imports, currentLocation, schema.typeName);
+        return this.builderFunctionsFor(inline, schema, info.typeName, 'anyOf', imports, currentLocation, schema.typeName);
       }
       return [];
     });
   }
 
-  private builderMethodsFromOneOf(info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+  private builderMethodsFromOneOf(inline: boolean, info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     return info.holder.schema.oneOf!.flatMap((_, index) => {
       const schema = this.findSchema(`${info.path}/oneOf/${index}`);
       if(schema && schema.hasBuilder) {
-        return this.builderFunctionsFor(schema, info.typeName, 'anyOf', imports, currentLocation, schema.typeName);
+        return this.builderFunctionsFor(inline, schema, info.typeName, 'anyOf', imports, currentLocation, schema.typeName);
       }
       return [];
     })
   }
 
-  private builderMethodsFromAdditionalProperties(info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+  private builderMethodsFromAdditionalProperties(inline: boolean, info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     if(info.holder.schema.additionalProperties) {
       const schema = this.findSchema(info.path + '/additionalProperties');
       if(schema)
-        return [this.builderFunctionsFor(schema, info.typeName!, 'additionalProperties', imports, currentLocation)];
+        return [this.builderFunctionsFor(inline, schema, info.typeName!, 'additionalProperties', imports, currentLocation)];
     }
     return [];
   }
 
-  private builderMethodsFromObject(info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
-    const additionalPropsFunctions = this.builderMethodsFromAdditionalProperties(info, imports, currentLocation);
+  private builderMethodsFromObject(inline: boolean, info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+    const additionalPropsFunctions = this.builderMethodsFromAdditionalProperties(inline, info, imports, currentLocation);
     if(info.holder.schema.properties) {
       return [...additionalPropsFunctions, ...Object.keys(info.holder.schema.properties).flatMap(property => {
         const schema = this.findSchema(info.path + '/properties/' + property);
         if(schema)
-          return this.builderFunctionsFor(schema, info.typeName!, 'object', imports, currentLocation, property);
+          return this.builderFunctionsFor(inline, schema, info.typeName!, 'object', imports, currentLocation, property);
         const holder = SchemaInfoBuilder.schemaHolderFor(info.holder.schema.properties![property] as any);
         const holderInfo: SchemaInfo = { path: '', holder, hasBuilder: false, location: currentLocation };
-        return this.builderFunctionsFor(holderInfo, info.typeName!, 'object', imports, currentLocation, property);
+        return this.builderFunctionsFor(inline, holderInfo, info.typeName!, 'object', imports, currentLocation, property);
       })];
     }
     return additionalPropsFunctions;
   }
 
-  private builderMethodsFromArray(info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+  private builderMethodsFromArray(inline: boolean, info: SchemaInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     if(!Array.isArray(info.holder.schema.items)) {
       const schema = this.findSchema(info.path + '/items');
       if(schema)
-        return [this.builderFunctionsFor(schema, info.typeName!, 'array', imports, currentLocation)];
+        return [this.builderFunctionsFor(inline, schema, info.typeName!, 'array', imports, currentLocation)];
     } else {
       //TODO solve for tuples
     }
@@ -368,12 +373,12 @@ export class SchemaToTsBuilder {
     }
   }
 
-  private methodsFrom(info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
+  private methodsFrom(inline: boolean, info: BuilderInfo, imports: Imports, currentLocation: Dir): TsFunction[] {
     switch(info.holder.type) {
-      case 'object': return this.builderMethodsFromObject(info, imports, currentLocation);
-      case 'array': return this.builderMethodsFromArray(info, imports, currentLocation);
-      case 'anyOf': return this.builderMethodsFromAnyOf(info, imports, currentLocation);
-      case 'oneOf': return this.builderMethodsFromOneOf(info, imports, currentLocation);
+      case 'object': return this.builderMethodsFromObject(inline, info, imports, currentLocation);
+      case 'array': return this.builderMethodsFromArray(inline, info, imports, currentLocation);
+      case 'anyOf': return this.builderMethodsFromAnyOf(inline, info, imports, currentLocation);
+      case 'oneOf': return this.builderMethodsFromOneOf(inline, info, imports, currentLocation);
       default: return [];
     }
   }

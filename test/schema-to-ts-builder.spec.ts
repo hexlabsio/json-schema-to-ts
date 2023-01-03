@@ -25,7 +25,7 @@ function compare(file: FilePart, name: string) {
 
 describe('Simple Schemas', () => {
   it('should model single property object schema', () => {
-    const outputDir = SchemaToTsBuilder.create(simple, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(simple, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(1);
     compare(files[0], 'simple-model');
@@ -33,7 +33,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model single required property object schema', () => {
-    const outputDir = SchemaToTsBuilder.create(simpleRequired, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(simpleRequired, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(1);
     compare(files[0], 'simple-required-model');
@@ -41,7 +41,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model ref', () => {
-    const outputDir = SchemaToTsBuilder.create(ref, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(ref, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(1);
     compare(files[0], 'ref-model');
@@ -49,21 +49,21 @@ describe('Simple Schemas', () => {
   });
 
   it('should model ref object', () => {
-    const outputDir = SchemaToTsBuilder.create(refObject, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(refObject, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(2);
     compare(files[0], 'ref-object-model');
   });
 
   it('should model ref array', () => {
-    const outputDir = SchemaToTsBuilder.create(refArray, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(refArray, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(2);
     compare(files[1], 'ref-array-model');
   });
 
   it('should model allOf', () => {
-    const outputDir = SchemaToTsBuilder.create(allOf, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(allOf, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(5);
     compare(files[0], 'all-of/TestAllOf');
@@ -74,7 +74,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model primitive allOf', () => {
-    const outputDir = SchemaToTsBuilder.create(primitiveAllOf, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(primitiveAllOf, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(1);
     compare(files[0], 'all-of/PrimitiveAllOf');
@@ -82,7 +82,7 @@ describe('Simple Schemas', () => {
 
 
   it('should model dual type', () => {
-    const outputDir = SchemaToTsBuilder.create(dualType, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(dualType, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(2);
     compare(files[0], 'any-of/TestAny_Type');
@@ -90,7 +90,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model anyOf', () => {
-    const outputDir = SchemaToTsBuilder.create(anyOf, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(anyOf, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(2);
     compare(files[0], 'any-of/TestAny_Type');
@@ -101,7 +101,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model wrapped anyOf', () => {
-    const outputDir = SchemaToTsBuilder.create(anyOfWrapped, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(anyOfWrapped, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(3);
     compare(files[0], 'any-of/AnyWrapped');
@@ -114,7 +114,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model wrapped anyOf when additional properties', () => {
-    const outputDir = SchemaToTsBuilder.create(anyOfWrappedAdditional, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(anyOfWrappedAdditional, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(3);
     compare(files[0], 'any-of/AnyAsAdditional');
@@ -124,7 +124,7 @@ describe('Simple Schemas', () => {
   });
 
   it('should model anyOf when additional properties are all refs', () => {
-    const outputDir = SchemaToTsBuilder.create(anyOfRef, testOutput).modelFiles();
+    const outputDir = SchemaToTsBuilder.create(anyOfRef, testOutput).modelFiles(true);
     const files = outputDir.get().files;
     expect(files.length).toEqual(4);
     compare(files[0], 'any-of/TestAnyOptions');

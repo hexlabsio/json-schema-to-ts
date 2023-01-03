@@ -14,11 +14,11 @@
   },
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git@github.com:hexlabsio/json-schema-to-ts.git"
   },
-  "author": "template",
+  "author": "HexLabs",
   "bugs": {
-    "url": "https://github.com/hexlabsio/typescript-template/issues"
+    "url": "https://https://github.com/hexlabsio/json-schema-to-ts/issues"
   },
   "husky": {
     "hooks": {
@@ -26,25 +26,16 @@
     }
   },
   "jest": {
-    "transform": {
-      ".(ts)": "ts-jest"
-    },
-    "reporters": [
-      "default",
-      "jest-junit"
-    ],
-    "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
-    "moduleFileExtensions": [
-      "ts",
-      "js"
-    ]
+    "preset": "ts-jest"
   },
-  "homepage": "",
+  "homepage": "https://github.com/hexlabsio/json-schema-to-ts/README.md",
   "devDependencies": {
     "@types/jest": "^26.0.23",
     "@types/node": "^16.18.8",
     "@typescript-eslint/eslint-plugin": "^4.26.0",
     "@typescript-eslint/parser": "^4.26.0",
+    "chalk": "^4.1.2",
+    "commander": "^9.4.1",
     "eslint": "^7.27.0",
     "eslint-plugin-jest": "^24.3.6",
     "husky": "^6.0.0",
